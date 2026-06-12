@@ -1,0 +1,12 @@
+# Input bank statements and generated camt output — contain sensitive account data
+in/
+out/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
