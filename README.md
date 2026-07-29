@@ -110,7 +110,9 @@ signature and signer certificate:
 ```
 
 The payload is already camt.053 — but PBZ issues **camt.053.001.02** (ISO 2009), so the
-script upconverts it to `.08`. Four changes, all verified against the official XSD:
+script upconverts it to `.08`. The change set was derived by **diffing the .02 and .08
+schemas**, not from one sample file, so constructs absent from any given statement (bank
+charges especially) are still handled:
 
 | | `.02` | `.08` |
 |---|---|---|
@@ -118,6 +120,11 @@ script upconverts it to `.08`. Four changes, all verified against the official X
 | entry status | `<Sts>BOOK</Sts>` | `<Sts><Cd>BOOK</Cd></Sts>` (`EntryStatus1Choice`) |
 | related parties | `<Dbtr><Nm>` | `<Dbtr><Pty><Nm>` (`Party40Choice`) |
 | financial institution | `<BIC>` | `<BICFI>` |
+| **bank charges** | `<Chrgs><Amt>` (repeatable) | `<Chrgs><Rcrd><Amt>` — one `Chrgs`, many `Rcrd`, so repeats are **merged**; `<Pty>`→`<Agt>` |
+| organisation id | `<OrgId><BICOrBEI>` | `<OrgId><AnyBIC>` |
+| summary net total | `<TtlNetNtryAmt Ccy=…>` | `<TtlNetNtry><Amt>` (currency attribute dropped) |
+| remittance location | flat `<RmtLctnMtd>` | `<RmtLctnDtls><Mtd>` |
+| tax admin zone | `<AdmstnZn>` | `<AdmstnZone>` |
 
 Also reconciles `OPBD`/`CLBD` against the entries, and is **idempotent** — re-running on `.08`
 input returns it byte-identical. Output uses the unprefixed default namespace (prefixed output

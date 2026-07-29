@@ -16,13 +16,23 @@ The ZIP (sometimes nested one level) contains a camt.053 XML — but PBZ issues 
 **camt.053.001.02** (ISO 2009), while ERPs following the current Croatian HUB/FINA
 standard expect **camt.053.001.08**. This script unwraps and upconverts.
 
-.02 -> .08 changes applied (all verified against the official camt.053.001.08 XSD):
+.02 -> .08 changes applied (each verified against the official camt.053.001.08 XSD;
+the rename set was derived by diffing the .02 and .08 schemas, not by guesswork):
   1. namespace            urn:...camt.053.001.02  ->  urn:...camt.053.001.08
   2. entry status         <Sts>BOOK</Sts>         ->  <Sts><Cd>BOOK</Cd></Sts>
                           (EntryStatus1Choice)
   3. related parties      <Dbtr><Nm>..            ->  <Dbtr><Pty><Nm>..
                           (Party40Choice: InitgPty/Dbtr/UltmtDbtr/Cdtr/UltmtCdtr/TradgPty)
   4. financial institution <FinInstnId><BIC>      ->  <FinInstnId><BICFI>
+  5. charges              <Chrgs><Amt>..          ->  <Chrgs><Rcrd><Amt>..
+                          (ChargesInformation6 -> Charges6/ChargesRecord3; note .02
+                          allows repeating <Chrgs> while .08 allows one with repeating
+                          <Rcrd>, so multiples are merged. <Pty> becomes <Agt>.)
+  6. organisation id      <OrgId><BICOrBEI>       ->  <OrgId><AnyBIC>
+  7. summary net total    <TtlNetNtryAmt Ccy=..>  ->  <TtlNetNtry><Amt>..</Amt>..
+                          (Ccy attribute dropped — .08 types it as a plain decimal)
+  8. remittance location  flat <RmtLctnMtd>..     ->  <RmtLctnDtls><Mtd>..
+  9. tax admin zone       <AdmstnZn>              ->  <AdmstnZone>
 
 NOTE: the envelope's digital signature is NOT verified — the payload is only
 extracted. Treat provenance as you would the original file from the bank.
@@ -58,6 +68,25 @@ NS08 = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"
 
 # Elements typed Party40Choice in .08 -> their content must sit inside <Pty>.
 PARTY_CHOICE = {"InitgPty", "Dbtr", "UltmtDbtr", "Cdtr", "UltmtCdtr", "TradgPty"}
+
+# Plain renames .02 -> .08. These names are unambiguous schema-wide; <BIC> is
+# handled separately because it needs a parent guard.
+RENAMES = {"BICOrBEI": "AnyBIC", "AdmstnZn": "AdmstnZone"}
+
+# RemittanceLocation2 (.02, flat) -> RemittanceLocation7 (.08, nested in RmtLctnDtls).
+RMT_LCTN = {"RmtLctnMtd": "Mtd",
+            "RmtLctnElctrncAdr": "ElctrncAdr",
+            "RmtLctnPstlAdr": "PstlAdr"}
+
+
+def _q(name: str) -> str:
+    return f"{{{NS08}}}{name}"
+
+
+def _renamed(local: str, parent_local: str | None) -> str:
+    if local == "BIC" and parent_local == "FinInstnId":
+        return "BICFI"
+    return RENAMES.get(local, local)
 
 MAX_ZIP_DEPTH = 5
 
@@ -118,20 +147,34 @@ def _convert(el: etree._Element, parent_local: str | None = None,
     # nsmap is passed only for the root, so the whole tree serialises with an
     # unprefixed default namespace (matching what the banks themselves emit —
     # prefixed output is schema-valid but trips naive ERP parsers).
-    new = etree.Element(f"{{{NS08}}}{local}", nsmap=nsmap)
+    new = etree.Element(_q(_renamed(local, parent_local)), nsmap=nsmap)
     for k, v in el.attrib.items():
         new.set(k, v)
 
-    # (4) BIC -> BICFI inside FinInstnId
-    if local == "BIC" and parent_local == "FinInstnId":
-        new = etree.Element(f"{{{NS08}}}BICFI")
-        new.text = el.text
-        return new
-
     # (2) <Sts>BOOK</Sts> -> <Sts><Cd>BOOK</Cd></Sts>
     if local == "Sts" and len(el) == 0 and (el.text or "").strip():
-        cd = etree.SubElement(new, f"{{{NS08}}}Cd")
+        cd = etree.SubElement(new, _q("Cd"))
         cd.text = el.text.strip()
+        return new
+
+    # (5) ChargesInformation6 (flat) -> Charges6 { TtlChrgsAndTaxAmt?, Rcrd* }.
+    # Skip if already .08-shaped (has Rcrd) so passthrough stays a no-op.
+    if (local == "Chrgs" and len(el)
+            and not any(etree.QName(c).localname == "Rcrd" for c in el)):
+        rcrd_kids = []
+        for c in el:
+            if etree.QName(c).localname == "TtlChrgsAndTaxAmt":
+                new.append(_convert(c, "Chrgs"))
+            else:
+                rcrd_kids.append(c)
+        if rcrd_kids:
+            rcrd = etree.SubElement(new, _q("Rcrd"))
+            for c in rcrd_kids:
+                conv = _convert(c, "Rcrd")
+                # ChargesInformation6/Pty -> ChargesRecord3/Agt
+                if etree.QName(c).localname == "Pty":
+                    conv.tag = _q("Agt")
+                rcrd.append(conv)
         return new
 
     # (3) Party40Choice: wrap children in <Pty> (only inside RltdPties).
@@ -147,7 +190,72 @@ def _convert(el: etree._Element, parent_local: str | None = None,
     new.text = el.text if (el.text and el.text.strip()) else None
     for child in el:
         new.append(_convert(child, local))
+    _restructure(new, local)
     return new
+
+
+def _restructure(new: etree._Element, local: str) -> None:
+    """Fixes that need sibling context, applied after children are converted."""
+    if local in ("Ntry", "TxDtls"):
+        _merge_charges(new)
+    elif local == "TtlNtries":
+        _fix_total_net(new)
+    elif local == "RltdRmtInf":
+        _fix_rmt_lctn(new)
+
+
+def _merge_charges(parent: etree._Element) -> None:
+    """.02 allows repeating <Chrgs>; .08 allows one <Chrgs> with repeating <Rcrd>."""
+    chrgs = [c for c in parent if c.tag == _q("Chrgs")]
+    if len(chrgs) < 2:
+        return
+    first, rest = chrgs[0], chrgs[1:]
+    for extra in rest:
+        for rcrd in [r for r in extra if r.tag == _q("Rcrd")]:
+            first.append(rcrd)
+        # keep a total only if the first one lacks it
+        if first.find(_q("TtlChrgsAndTaxAmt")) is None:
+            tot = extra.find(_q("TtlChrgsAndTaxAmt"))
+            if tot is not None:
+                first.insert(0, tot)
+        parent.remove(extra)
+
+
+def _fix_total_net(parent: etree._Element) -> None:
+    """<TtlNetNtryAmt Ccy=..>X</><CdtDbtInd>Y</> -> <TtlNetNtry><Amt>X</><CdtDbtInd>Y</></>.
+
+    Note .08 types the amount as NonNegativeDecimalNumber, so the Ccy attribute
+    present in .02 must be dropped.
+    """
+    amt = parent.find(_q("TtlNetNtryAmt"))
+    if amt is None:
+        return
+    idx = list(parent).index(amt)
+    net = etree.Element(_q("TtlNetNtry"))
+    a = etree.SubElement(net, _q("Amt"))
+    a.text = amt.text
+    cdi = parent.find(_q("CdtDbtInd"))
+    if cdi is not None:
+        c = etree.SubElement(net, _q("CdtDbtInd"))
+        c.text = cdi.text
+        parent.remove(cdi)
+    parent.remove(amt)
+    parent.insert(idx, net)
+
+
+def _fix_rmt_lctn(parent: etree._Element) -> None:
+    """Flat RmtLctn* (.02) -> nested <RmtLctnDtls> (.08)."""
+    found = [(c, RMT_LCTN[etree.QName(c).localname]) for c in parent
+             if etree.QName(c).localname in RMT_LCTN]
+    if not found:
+        return
+    idx = list(parent).index(found[0][0])
+    dtls = etree.Element(_q("RmtLctnDtls"))
+    for c, newname in found:
+        parent.remove(c)
+        c.tag = _q(newname)
+        dtls.append(c)
+    parent.insert(idx, dtls)
 
 
 def upconvert(xml_bytes: bytes) -> tuple[bytes, str]:
