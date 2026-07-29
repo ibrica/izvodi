@@ -1,8 +1,13 @@
-# ZABA PDF → camt.053 converter
+# Croatian bank statements → camt.053.001.08
 
-Converts Zagrebačka banka (ZABA) PDF account statements (`IZVADAK`, internal layout
-`PLPIZV2`) into ISO 20022 **camt.053.001.08** XML for ERP import. Follows the Croatian
-HUB/FINA *"Uputa za klijente – camt.053/052/054"* standard (in force since 19.11.2023).
+Converts Croatian bank account statements into ISO 20022 **camt.053.001.08** XML for ERP
+import, following the HUB/FINA *"Uputa za klijente – camt.053/052/054"* standard (in force
+since 19.11.2023).
+
+| Script | Bank | Input |
+|---|---|---|
+| `pdf_to_camt053.py` | Zagrebačka banka (ZABA) | PDF statement (`IZVADAK`, layout `PLPIZV2`) |
+| `pbz_sgn_to_camt053.py` | Privredna banka Zagreb (PBZ) | signed `*.zip.sgn` envelope |
 
 ## Requirements
 
@@ -10,7 +15,7 @@ HUB/FINA *"Uputa za klijente – camt.053/052/054"* standard (in force since 19.
 python3 -m pip install --user -r requirements.txt   # pdfplumber, lxml
 ```
 
-## Usage
+## Usage — ZABA (PDF)
 
 ```bash
 python3 pdf_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
@@ -23,7 +28,7 @@ python3 pdf_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
 
 Each output is named `BCS.<OIB>.<YYYYMMDD>.<NNNN>.xml` per the HUB file-naming convention.
 
-## What it does
+### What it does
 
 - Reconstructs the statement table from word **coordinates** (not naive line text), so the
   columns (counterparty / references / Duguje / Potražuje) split reliably.
@@ -33,6 +38,41 @@ Each output is named `BCS.<OIB>.<YYYYMMDD>.<NNNN>.xml` per the HUB file-naming c
   `Ukupan` totals printed on the PDF before writing.
 - Verified on single-entry debit, single-entry credit, and multi-entry (8 debits) statements;
   output validates against the official `camt.053.001.08.xsd`.
+
+## Usage — PBZ (signed `.sgn`)
+
+```bash
+python3 pbz_sgn_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
+```
+
+### What it does
+
+A PBZ `.sgn` file is **not a zip** despite the `.zip.sgn` name — it is an XML `<FileUpload>`
+envelope containing a base64-encoded (and internally **nested**) ZIP, plus a detached
+signature and signer certificate:
+
+```
+*.zip.sgn  →  <FileUpload>
+               ├─ <File compress="zip" encoding="base64">  →  ZIP → nested ZIP → camt.053 XML
+               └─ <Certificate> + <Sign>                       (detached signature)
+```
+
+The payload is already camt.053 — but PBZ issues **camt.053.001.02** (ISO 2009), so the
+script upconverts it to `.08`. Four changes, all verified against the official XSD:
+
+| | `.02` | `.08` |
+|---|---|---|
+| namespace | `…camt.053.001.02` | `…camt.053.001.08` |
+| entry status | `<Sts>BOOK</Sts>` | `<Sts><Cd>BOOK</Cd></Sts>` (`EntryStatus1Choice`) |
+| related parties | `<Dbtr><Nm>` | `<Dbtr><Pty><Nm>` (`Party40Choice`) |
+| financial institution | `<BIC>` | `<BICFI>` |
+
+Also reconciles `OPBD`/`CLBD` against the entries, and is **idempotent** — re-running on `.08`
+input returns it byte-identical. Output uses the unprefixed default namespace (prefixed output
+is schema-valid but trips naive ERP parsers).
+
+> The envelope's digital signature is **not verified** — only the payload is extracted.
+> Treat provenance as you would the original file from the bank.
 
 ## Notes / limitations
 

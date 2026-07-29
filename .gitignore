@@ -2,6 +2,11 @@
 in/
 out/
 
+# Bank statement files dropped in the repo root (PBZ signed envelopes, raw statements)
+*.sgn
+*.zip
+IZVOD*.pdf
+
 # macOS
 .DS_Store
 
