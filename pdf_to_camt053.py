@@ -30,6 +30,15 @@ from lxml import etree
 
 logging.getLogger("pdfminer").setLevel(logging.ERROR)  # silence color-space warnings
 
+# Windows consoles and redirected output default to a legacy code page (cp1252),
+# which cannot encode Croatian characters (č ć ž š đ) in bank/counterparty names.
+# Force UTF-8 so `python ... > log.txt` never dies with UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # non-reconfigurable stream
+        pass
+
 CAMT_NS = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"
 
 # ---- Column x-bands (page width ~595pt), derived from the PLPIZV2 layout. ----

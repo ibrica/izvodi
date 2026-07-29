@@ -9,16 +9,60 @@ since 19.11.2023).
 | `pdf_to_camt053.py` | Zagrebačka banka (ZABA) | PDF statement (`IZVADAK`, layout `PLPIZV2`) |
 | `pbz_sgn_to_camt053.py` | Privredna banka Zagreb (PBZ) | signed `*.zip.sgn` envelope |
 
-## Requirements
+## Setup
+
+Needs **Python 3.9 or newer** and two packages (`pdfplumber`, `lxml`). Everything is pure
+Python — there is nothing else to install (no Poppler, no Java, no Acrobat).
+
+### macOS / Linux
 
 ```bash
-python3 -m pip install --user -r requirements.txt   # pdfplumber, lxml
+python3 -m pip install --user -r requirements.txt
 ```
+
+### Windows
+
+1. **Install Python** from [python.org/downloads](https://www.python.org/downloads/).
+   During the installer, tick **"Add python.exe to PATH"** — this is the step people miss.
+   Then open **PowerShell** and check it worked:
+
+   ```powershell
+   py --version
+   ```
+
+2. **Get the code** — either `git clone <repo-url>`, or download the repo as a ZIP from
+   GitHub ("Code" → "Download ZIP") and extract it.
+
+3. **Install the dependencies** from inside the project folder:
+
+   ```powershell
+   cd C:\path\to\Izvodi
+   py -m pip install -r requirements.txt
+   ```
+
+### Create the `in` folder
+
+`in/` and `out/` are git-ignored (they hold real account data), so a fresh clone won't have
+them. Create `in` and drop the statement files in — `out` is created automatically:
+
+```bash
+mkdir in          # PowerShell and bash both accept this
+```
+
+That's it — the run commands are below.
 
 ## Usage — ZABA (PDF)
 
+Put the PDF statements in `in/`, then:
+
 ```bash
 python3 pdf_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
+```
+
+On Windows (PowerShell), use `py` and backslashes:
+
+```powershell
+py pdf_to_camt053.py --in .\in --out .\out --xsd camt.053.001.08.xsd
 ```
 
 - `--in`   folder with PDF statements (scanned **recursively**, so dated subfolders work)
@@ -41,8 +85,16 @@ Each output is named `BCS.<OIB>.<YYYYMMDD>.<NNNN>.xml` per the HUB file-naming c
 
 ## Usage — PBZ (signed `.sgn`)
 
+Put the `*.zip.sgn` files in `in/`, then:
+
 ```bash
 python3 pbz_sgn_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
+```
+
+On Windows (PowerShell):
+
+```powershell
+py pbz_sgn_to_camt053.py --in .\in --out .\out --xsd camt.053.001.08.xsd
 ```
 
 ### What it does
@@ -73,6 +125,21 @@ is schema-valid but trips naive ERP parsers).
 
 > The envelope's digital signature is **not verified** — only the payload is extracted.
 > Treat provenance as you would the original file from the bank.
+
+## Troubleshooting (mostly Windows)
+
+| Symptom | Fix |
+|---|---|
+| `py : The term 'py' is not recognized` | Python isn't on PATH. Reinstall from python.org with **"Add python.exe to PATH"** ticked, or try `python` instead of `py`. |
+| `No module named pdfplumber` / `lxml` | Dependencies not installed, or installed for a different Python. Run `py -m pip install -r requirements.txt` (note the `py -m` prefix — it targets the same interpreter that runs the script). |
+| `No PDFs found` / `No .sgn files found` | Check `--in` points at the right folder. Subfolders are scanned automatically, so `--in .\in` finds `in\Izvodi 2026-06-12\*.pdf`. |
+| Folder name has spaces | Quote it: `--in ".\in\Izvodi 2026-06-12"` |
+| `running scripts is disabled on this system` | That's PowerShell blocking a `.ps1`, not this tool. These are plain `py` commands — they don't need a policy change. |
+
+Forward slashes also work on Windows (`--in ./in`), so commands can be copy-pasted from
+either section. Console output is forced to UTF-8, so Croatian characters (č ć ž š đ) in
+account and counterparty names survive being redirected to a file
+(`py pdf_to_camt053.py --in .\in --out .\out > log.txt`).
 
 ## Notes / limitations
 

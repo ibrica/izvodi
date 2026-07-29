@@ -44,6 +44,15 @@ from decimal import Decimal
 
 from lxml import etree
 
+# Windows consoles and redirected output default to a legacy code page (cp1252),
+# which cannot encode Croatian characters (č ć ž š đ) in account/party names.
+# Force UTF-8 so `python ... > log.txt` never dies with UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # non-reconfigurable stream
+        pass
+
 NS02 = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.02"
 NS08 = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"
 
