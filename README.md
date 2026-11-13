@@ -16,9 +16,17 @@ Python — there is nothing else to install (no Poppler, no Java, no Acrobat).
 
 ### macOS / Linux
 
+Install [uv](https://docs.astral.sh/uv/) if you don't have it (`brew install uv` on macOS).
+A Python installed by uv is externally managed, so `pip install` (including `--user`) is
+refused. Create a project virtualenv — `.venv/` is git-ignored — and install into that:
+
 ```bash
-python3 -m pip install --user -r requirements.txt
+uv venv
+uv pip install -r requirements.txt
 ```
+
+`uv run` uses that environment, so you don't need to activate it. The run commands below
+use this form.
 
 ### Windows
 
@@ -56,7 +64,7 @@ That's it — the run commands are below.
 Put the PDF statements in `in/`, then:
 
 ```bash
-python3 pdf_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
+uv run python pdf_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
 ```
 
 On Windows (PowerShell), use `py` and backslashes:
@@ -88,7 +96,7 @@ Each output is named `BCS.<OIB>.<YYYYMMDD>.<NNNN>.xml` per the HUB file-naming c
 Put the `*.zip.sgn` files in `in/`, then:
 
 ```bash
-python3 pbz_sgn_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
+uv run python pbz_sgn_to_camt053.py --in ./in --out ./out --xsd camt.053.001.08.xsd
 ```
 
 On Windows (PowerShell):
@@ -133,12 +141,13 @@ is schema-valid but trips naive ERP parsers).
 > The envelope's digital signature is **not verified** — only the payload is extracted.
 > Treat provenance as you would the original file from the bank.
 
-## Troubleshooting (mostly Windows)
+## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `py : The term 'py' is not recognized` | Python isn't on PATH. Reinstall from python.org with **"Add python.exe to PATH"** ticked, or try `python` instead of `py`. |
-| `No module named pdfplumber` / `lxml` | Dependencies not installed, or installed for a different Python. Run `py -m pip install -r requirements.txt` (note the `py -m` prefix — it targets the same interpreter that runs the script). |
+| `No module named pdfplumber` / `lxml` | Dependencies not installed, or installed for a different Python. On macOS/Linux run `uv pip install -r requirements.txt` and start the script with `uv run python`. On Windows run `py -m pip install -r requirements.txt` (the `py -m` prefix targets the same interpreter that runs the script). |
+| `externally-managed-environment` | You ran `pip install` against a uv-managed Python. Use the project virtualenv instead: `uv venv` then `uv pip install -r requirements.txt`. |
 | `No PDFs found` / `No .sgn files found` | Check `--in` points at the right folder. Subfolders are scanned automatically, so `--in .\in` finds `in\Izvodi 2026-06-12\*.pdf`. |
 | Folder name has spaces | Quote it: `--in ".\in\Izvodi 2026-06-12"` |
 | `running scripts is disabled on this system` | That's PowerShell blocking a `.ps1`, not this tool. These are plain `py` commands — they don't need a policy change. |
